@@ -3,7 +3,8 @@ import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 
 interface SearchParams {
-  date?: string;
+  date_from?: string;
+  date_to?: string;
   venue?: string;
   track?: string;
 }
@@ -35,7 +36,8 @@ export default async function RacesPage({
     .order("scheduled_start_at", { ascending: true })
     .limit(100);
 
-  if (params.date) query = query.eq("race_date", params.date);
+  if (params.date_from) query = query.gte("race_date", params.date_from);
+  if (params.date_to) query = query.lte("race_date", params.date_to);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   if (params.venue) query = (query as any).eq("racecourse_id", parseInt(params.venue));
   if (params.track) query = query.eq("track_type", params.track);
@@ -49,11 +51,20 @@ export default async function RacesPage({
       {/* フィルタパネル */}
       <form method="get" className="rounded-xl bg-white ring-1 ring-gray-200 p-4 flex flex-wrap gap-3 items-end">
         <div className="flex flex-col gap-1 min-w-[140px]">
-          <label className="text-xs font-medium text-gray-600">日付</label>
+          <label className="text-xs font-medium text-gray-600">日付（開始）</label>
           <input
-            name="date"
+            name="date_from"
             type="date"
-            defaultValue={params.date}
+            defaultValue={params.date_from}
+            className="rounded-md border border-gray-300 px-2 py-1.5 text-sm focus:border-indigo-500 focus:outline-none"
+          />
+        </div>
+        <div className="flex flex-col gap-1 min-w-[140px]">
+          <label className="text-xs font-medium text-gray-600">日付（終了）</label>
+          <input
+            name="date_to"
+            type="date"
+            defaultValue={params.date_to}
             className="rounded-md border border-gray-300 px-2 py-1.5 text-sm focus:border-indigo-500 focus:outline-none"
           />
         </div>
