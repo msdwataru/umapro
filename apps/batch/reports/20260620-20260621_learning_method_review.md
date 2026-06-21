@@ -178,50 +178,98 @@ C が 500 で上限到達・未収束のため n=1000 で追加実行。
 
 ---
 
-## 8. 全モデル通算比較
+## 8. データ品質バグ：race_entry_id ソート漏洩
 
-| モデル | データ | 目的関数 | odds除外 | best_iter | ECE | ROI | Market比 |
-|---|---|---|---|---|---|---|---|
-| lgbm_ranker v1 | 旧82K | rank_xendcg | No | 12 | 0.229 | -22.8% | — |
-| no-odds Ranker | 旧82K | rank_xendcg | Yes | 21 | 0.004 | -27.4% | -7.2pt |
-| Binary A（旧） | 旧82K | binary | No | 72 | 0.003 | -22.5% | -2.3pt |
-| Binary B（旧） | 旧82K | binary | Yes | 100 | 0.004 | -21.5% | -1.4pt |
-| Binary C（旧） | 旧82K | binary+log重み | No | 471 | 0.017 | -24.6% | -4.4pt |
-| Binary A | **修正207K** | binary | No | 86 | 0.004 | -23.3% | -2.8pt |
-| Binary B | **修正207K** | binary | Yes | 219 | 0.005 | -29.6% | -9.1pt |
-| Binary C（n=500） | **修正207K** | binary+log重み | No | 500(上限) | 0.037 | -20.4% | +0.15pt |
-| Binary C（n=1000） | **修正207K** | binary+log重み | No | 998(上限) | — | -21.5% | -0.94pt |
-| **Market（天井）** | — | — | — | — | — | **-20.5%** | 基準 |
+Overlay 回帰実装中に発見した重大な評価バグ。
+
+| ソートキー | idxmax() タイブレーク hit_rate | 備考 |
+|---|---|---|
+| `finish_position` | **1.0000**（常に1着） | 旧バグ: binary も同様 |
+| `race_entry_id` | **1.0000**（常に1着） | 着順順に採番されているため |
+| `horse_number` | **0.0698**（ランダム≈1/14） | 抽選番号→結果と無相関 ✅ |
+
+**根本原因**: keibalab_job.py が結果ページを着順で処理するため、race_entry_id が 1着馬=最小値となる。  
+**影響**: best_iter=2 などで予測値がほぼ定数の場合、idxmax() が常に1着馬を選び ROI=550% の偽陽性が発生。  
+**修正**: `train_overlay.py`, `train_binary.py` の `_load()` で `horse_number` ソートに変更済み。
 
 ---
 
-## 9. 総合結論と次のステップ
+## 9. Overlay 直接ターゲット学習（2026-06-21 夜）
+
+```
+target  = is_win(0/1) - market_prob  (正=市場過小評価、負=市場過大評価)
+features = odds系除外（60特徴量）
+```
+
+| モデル | best_iter | RMSE | 予測-実相関 | ROI(top) | 95% CI | p値 | Market比 |
+|---|---|---|---|---|---|---|---|
+| D: Overlay回帰（RMSE） | **2** | 0.2385 | 0.015 | -12.39% | [-39.5%, +18.9%] | 0.26 | +10.1pt |
+| E: Overlay回帰（Huber） | **2** | 0.2385 | 0.013 | -6.31% | [-32.7%, +24.1%] | 0.13 | +16.1pt |
+| **Market（天井）** | — | — | — | **-22.44%** | — | — | 基準 |
+
+**判定**: D/E ともに Market を名目上上回るが非有意（p > 0.05）。CI が[-40%, +25%]と極めて広い。
+
+**根本問題**: best_iter=2 で早期収束。  
+- 予測値がほぼ定数（0.000171 が66%占有、unique値=79/20929行）  
+- corr(予測, 実際) = 0.015 → 現在の特徴量では Overlay に対する信号がほぼゼロ  
+- 「キャリブレーション改善 ≠ ROI 改善」と同じパターンの繰り返し
+
+---
+
+## 10. 全モデル通算比較
+
+| モデル | データ | 目的関数 | odds除外 | best_iter | ROI | Market比 |
+|---|---|---|---|---|---|---|
+| lgbm_ranker v1 | 旧82K | rank_xendcg | No | 12 | -22.8% | — |
+| no-odds Ranker | 旧82K | rank_xendcg | Yes | 21 | -27.4% | -7.2pt |
+| Binary A（旧） | 旧82K | binary | No | 72 | -22.5% | -2.3pt |
+| Binary B（旧） | 旧82K | binary | Yes | 100 | -21.5% | -1.4pt |
+| Binary C（旧） | 旧82K | binary+log重み | No | 471 | -24.6% | -4.4pt |
+| Binary A | **修正207K** | binary | No | 86 | -23.3% | -2.8pt |
+| Binary B | **修正207K** | binary | Yes | 219 | -29.6% | -9.1pt |
+| Binary C（n=500） | **修正207K** | binary+log重み | No | 500(上限) | -20.4% | +0.15pt |
+| Binary C（n=1000） | **修正207K** | binary+log重み | No | 998(上限) | -21.5% | -0.94pt |
+| D: Overlay回帰（RMSE） | **修正207K** | regression | Yes | 2 | -12.39%* | +10.1pt* |
+| E: Overlay回帰（Huber） | **修正207K** | huber | Yes | 2 | -6.31%* | +16.1pt* |
+| **Market（天井）** | — | — | — | — | **-20〜-22%** | 基準 |
+
+> *D/E は CI が非常に広く非有意。実質的に「何も学習していない」状態。
+
+---
+
+## 11. 総合結論と次のステップ
 
 ### 結論
 
 | 検証項目 | 結論 |
 |---|---|
 | 目的関数変更（Ranker → Binary） | ECE は改善、ROI は不変 |
-| オッズ除外 | データ量増加で best_iter は伸びるが ROI は改善せず |
-| log(odds) 重み付け | Market と同等水準まで改善、ただし有意差なし。天井は Market 前後 |
-| データ量不足仮説 | 部分的に正（best_iter が 21 → 219 に改善）、ただし ROI 改善には不十分 |
-| 信号不足仮説 | 残存する（非市場特徴量の win 相関は市場の半分以下） |
+| オッズ除外 | best_iter は伸びるが ROI は Market 以下 |
+| log(odds) 重み付け | 天井は Market 前後。それ以上は不可 |
+| Overlay 直接ターゲット | best_iter=2（早期収束）= 現在の特徴量に信号なし |
+| 共通結論 | **非市場特徴量には市場を超える情報がほぼない** |
 
-### 次のアクション：Overlay 直接ターゲット学習
+### 根本課題と次のアクション
 
-専門家処方の Step 3 へ進む。
+現在の非市場特徴量（騎手/厩舎/馬歴）は市場価格とほぼ同じ情報を含んでいる。  
+市場は既にこれらを織り込み済み → どのモデルも Market を超えられない。
 
-```
-target = actual_win(0/1) - market_prob(1/odds 正規化)
-features = odds 除外の非市場特徴量のみ
-```
+**Step 4（専門家処方）: 市場直交性の高い新特徴量の追加**
 
-- 市場の誤りを直接回帰させることで、モデルが「市場が過小評価している馬」を学習
-- Overlay ≥ 15% で正の ROI の兆候（B モデル）があり、方向性の根拠あり
-- `uma/models/train_overlay.py` として実装予定
+| 候補特徴量 | 市場直交性 | win相関 | 優先度 |
+|---|---|---|---|
+| `weight_diff_sc`（体重変化） | 0.971 | 0.008 | 低（win相関も低） |
+| `days_since_last_run`（休養日数） | 0.952 | 0.016 | 中 |
+| ペース適性（上り脚質、直線/中間） | 未計測 | 未計測 | 高（新規開発） |
+| コース適性（曲線数、幅員） | 未計測 | 未計測 | 高（新規開発） |
+| 馬体重 × 天候 交互作用 | 未計測 | 未計測 | 中 |
+
+現在の特徴量セットで市場直交性が高い特徴量は win 相関も低い（ほぼノイズ）。  
+**「市場は知らないが実際に重要な要因」**の発掘が必要。候補: ペース・コース形状・馬の疲労蓄積。
 
 ---
 
-*最終更新: 2026-06-21*  
-*スクリプト: `uma/models/train_no_odds.py`, `uma/models/train_binary.py`, `_step1_audit.py`, `_train_c_n1000.py`*  
-*インフラ修正: `uma/db/client.py`（キーセットページネーション）, `uma/features/builder.py`（タイムアウト修正）*
+*最終更新: 2026-06-21（Overlay実装完了）*  
+*スクリプト: `uma/models/train_binary.py`, `uma/models/train_overlay.py`*  
+*インフラ修正: `uma/db/client.py`（キーセット）, `uma/features/builder.py`（タイムアウト）*  
+*バグ修正: `race_entry_id` ソート漏洩 → `horse_number` に変更（両スクリプト）*
