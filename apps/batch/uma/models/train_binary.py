@@ -76,7 +76,8 @@ _BINARY_PARAMS = dict(
 def _load(parquet_path: Path) -> pd.DataFrame:
     df = pd.read_parquet(parquet_path)
     df = df[df["finish_position"].notna()].copy()
-    df = df.sort_values(["race_date", "race_id", "finish_position"]).reset_index(drop=True)
+    # race_entry_id は着順採番のためソートキー不適切。horse_number（抽選）を使う
+    df = df.sort_values(["race_date", "race_id", "horse_number"]).reset_index(drop=True)
     logger.info("Loaded: %d rows × %d cols", len(df), len(df.columns))
     return df
 
