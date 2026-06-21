@@ -5,8 +5,9 @@ import { usePathname } from "next/navigation";
 import { signOut } from "@/app/actions/auth";
 
 const links = [
-  { href: "/today", label: "今日の推奨" },
-  { href: "/races", label: "レース一覧" },
+  { href: "/picks", label: "買い目" },
+  { href: "/today", label: "レース" },
+  { href: "/races", label: "一覧" },
   { href: "/analysis", label: "条件分析" },
   { href: "/backtest", label: "バックテスト" },
   { href: "/mypage", label: "マイページ" },

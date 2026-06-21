@@ -1,5 +1,16 @@
 # Phase3: ROI Optimization & Betting Strategy
 
+## 統計的有意性の共通ルール（全Task適用）
+
+Phase0 で共通実装した `metrics_lib.py` を使い、全集計表に以下を付与する。
+
+* **n_bets < 200 のセルは「参考値」扱い**
+* **n_bets < 50 のセルは非表示**
+* **ROI信頼区間**：ブロックブートストラップ（race_id単位）95% CI
+* **p値**：`H0: ROI <= 100%` の片側検定（p < 0.05 で有意）
+
+---
+
 ## 目的
 
 Phase1でモデルの優位性を検証し、
@@ -126,11 +137,28 @@ CalibratedClassifierCV(method="isotonic")
 
 ---
 
+### ⚠️ 必須：補正後のレース内正規化
+
+Platt / Isotonic は各馬を**独立**に補正するため、補正後にレース内合計が 100% からズレる。
+補正後は必ず **`race_id` 単位で softmax 再スケール** すること。
+
+```python
+# 補正後の正規化（必須）
+df["prob_calibrated"] = df.groupby("race_id")["prob_raw"].transform(
+    lambda x: x / x.sum()
+)
+```
+
+これを省略すると EV 計算が再び壊れ、Task2 の Overlay も無効になる。
+
+---
+
 ## 評価指標
 
 * Brier Score
 * LogLoss
-* Calibration Error
+* Calibration Error（ECE）
+* **レース内合計の平均・最大偏差**（正規化後に 1.0 ± 0.001 以内であることを確認）
 
 ---
 
@@ -268,67 +296,70 @@ Overlay > 15%
 
 ---
 
-## 新案
+## ⚠️ 素の `odds-1` ターゲットは採用禁止（分散爆発）
 
-ターゲット
+以下の案はレビューにより却下。
 
 ```text
-profit
-=
-odds - 1
+profit = odds - 1  ← 禁止
 ```
+
+理由：50倍で +49、外れで -1 という極端な歪み分布になる。
+回帰が外れ値（高オッズ的中）に引きずられ機能しない。
 
 ---
 
-### 例
+## 代替案（優先順に列挙）
 
-1.5倍
+### 案A: log(odds) 重み付き分類（推奨）
 
 ```text
-0.5
+target = 1（的中） / 0（外れ）
+sample_weight = log(odds)
 ```
+
+高配当的中を重視しながら、分散爆発を防ぐ。
 
 ---
 
-10倍
+### 案B: ペアワイズ Profit Ranking
 
 ```text
-9
+同レース内でペアを作り
+「A が B より高い利益をもたらすか」を二値分類
 ```
+
+分布が安定し、ROI 直結で学習できる。
 
 ---
 
-50倍
+### 案C: クリップ付き Profit 回帰（最終手段）
 
 ```text
-49
+target = clip(odds - 1, max=20)
 ```
+
+外れ値を抑制するが、高配当馬の情報を失う。
 
 ---
 
 ## 候補モデル
 
-### LightGBM Regressor
-
-利益予測
+### LightGBM（案A/B）
 
 ---
 
-### XGBoost Regressor
-
-利益予測
+### XGBoost（案B）
 
 ---
 
-### CatBoost Regressor
-
-利益予測
+### CatBoost（案A）
 
 ---
 
 ## 評価
 
-ROI基準で評価
+ROI基準（CI・p値付き）で評価。LogLoss 改善のみでは ROI 改善の証拠にならない。
 
 ---
 
@@ -428,27 +459,34 @@ q = 1-p
 
 ---
 
+## ⚠️ Kelly は「キャリブレーション完璧」が前提
+
+確率が不正確だと過剰ベットで**即破産**する。
+Kelly の適用は Phase3 Task1 の Calibration 完了（ECE < X%）後に限定する。
+
 ## 実装
+
+### Quarter Kelly（既定・推奨）
+
+25%
+
+**既定値として採用**。確率推定に誤差がある実運用では Quarter Kelly 以下が安全。
+
+---
+
+### Half Kelly（条件付き）
+
+50%
+
+**条件**: ECE < 5% かつ Walk-Forward 全 Fold で ROI > Market が確認されてから解禁。
+
+---
 
 ### Full Kelly
 
 100%
 
----
-
-### Half Kelly
-
-50%
-
-推奨
-
----
-
-### Quarter Kelly
-
-25%
-
-安全型
+理論上の最大成長だが、推定誤差があると破産リスクが極めて高い。**採用禁止**。
 
 ---
 
@@ -518,37 +556,38 @@ q = 1-p
 
 ## 方法
 
-### Train
+**Phase0 で定義した `cv_splits.json` と `walkforward_template.py` を使う。**
+独自の train/test 分割は禁止。
 
-2020-2024
+### Expanding Window（Phase0定義準拠）
 
-### Test
+```text
+Fold 1:  Train [2018-2021] → Test [2022]
+Fold 2:  Train [2018-2022] → Test [2023]
+Fold 3:  Train [2018-2023] → Test [2024]
+Fold 4:  Train [2018-2024] → Test [2025]
+Fold 5:  Train [2018-2025] → Test [2026(現在まで)]
+```
 
-2025
-
----
-
-### Train
-
-2020-2025
-
-### Test
-
-2026
+各 Fold の境界には **Embargo（2週間）** を挿入する。
 
 ---
 
 ## 評価
 
-* ROI
+* ROI（全 Test Fold 連結の out-of-sample ROI を報告）
 * Hit Rate
 * Profit
+* **ROI 95% CI**（ブロックブートストラップ）
+* **p値**（H0: ROI <= 100%、各 Fold および全体）
 
 ---
 
-## NG
+## NG（禁止）
 
-ランダム分割
+* ランダム分割
+* 単一 train/test split の数字のみ報告
+* ハイパーパラメータを Test 期間を見てチューニング
 
 ---
 

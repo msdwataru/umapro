@@ -1,5 +1,28 @@
 # Phase2: Feature Engineering & Model Improvement
 
+## 前提条件
+
+* **Phase0 完了**（オッズタイミング確定・リーク監査ゼロ・Walk-Forward 定義済み）
+* **Phase1 完了**（Market ベースラインを統計的有意に上回ることを確認済み）
+
+Phase1 で Market を超えられなかった場合は Phase2 より先に Phase3（Overlay/EV 設計）を実施する。
+
+---
+
+## ⚠️ Phase2 は「精度改善」であって「ROI改善」ではない
+
+特徴量を増やすと LogLoss / NDCG は改善するが、ROI はほぼ動かない。
+
+> 理由：勝率予測の精度は市場（オッズ）がほぼ織り込み済みであるため。
+
+ROI を動かすのは「精度」ではなく「市場との乖離（Overlay）」と「賭け方・資金管理」である。
+
+**特徴量の取捨選択の基準：「Overlay に効くか」で判断する。**
+コース適性 50 個より「Overlay に効く 3 個」を優先する。Phase3 の EV Engine 完成後に SHAP で再評価し、
+Overlay と無相関な特徴量は積極的に削除する。
+
+---
+
 ## 目的
 
 Phase1でモデルが市場に対して一定の優位性を持つことを確認できた場合、次の目標は予測精度の向上ではなく、
@@ -113,6 +136,13 @@ shap_summary.png
 ### 理想
 
 複数カテゴリがバランス良く寄与
+
+---
+
+### Phase3 連携観点
+
+SHAP 上位特徴量が Overlay（モデル確率 - 市場確率）と相関するかを確認する。
+相関しない特徴量は精度に貢献しても ROI には寄与しない可能性が高い。
 
 ---
 
@@ -478,9 +508,7 @@ ranking
 
 ## 主指標
 
-ROI
-
----
+ROI（Phase3 EV Engine 完成後に Overlay ベースで再評価）
 
 ## 副指標
 
@@ -489,6 +517,10 @@ ROI
 * NDCG
 * LogLoss
 * Brier Score
+* **Overlay との相関**（新特徴量が Overlay を増やすかを検証）
+
+> **注意**：LogLoss / NDCG の改善が ROI 改善を保証しない。
+> 副指標の改善を「ROI改善の証拠」として扱わないこと。
 
 ---
 
@@ -572,22 +604,22 @@ ROI
 
 # Phase2終了時の判断
 
-## ROI改善あり
+## ROI改善あり（Market を統計的有意に上回る）
 
 市場に対する優位性を確認
 
-→ Phase3へ進む
+→ Phase3（Overlay/Kelly）へ進む
 
 ---
 
 ## ROI改善なし
 
-特徴量ではなく学習戦略が問題
+特徴量追加では解決しない可能性が高い。
 
-→
+→ **Phase3（Overlay/EVエンジン）を先に実施し、Overlayに効く特徴量を特定してから Phase2 へ戻る**
 
-* EV学習
-* Profit Learning
+もしくは以下の学習戦略見直し:
+
+* EV学習（ターゲットを勝敗でなくOverlayに変更）
+* Profit Learning（`log(odds)` 重み付き分類。素の `odds-1` は分散爆発するため不可）
 * Reinforcement Learning
-
-を検討する

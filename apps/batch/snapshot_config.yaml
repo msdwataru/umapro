@@ -1,0 +1,33 @@
+# Phase0 Task 0-1: オッズ・タイムスナップショット設定
+#
+# BET_TIME: 実際に賭ける時刻の定義
+bet_time_offset_minutes: 5   # 発走 T-5分（実運用で購入を完了できる最後のタイミング）
+
+# オッズの二層管理
+#   odds_at_bet  : BET_TIME 時点のオッズ（購入判断・特徴量生成に使う）
+#   odds_final   : 確定オッズ（配当計算のみ。購入判断には使わない）
+odds_columns:
+  at_bet: odds_at_bet
+  final:  odds_final
+
+# 現在のデータ状況（2026-06-20 時点）
+# latest_win_odds は競馬ラボから過去レース一括取得時にスクレイプした値。
+# 発走後に取得しているため確定オッズに近い（odds_final ≒ latest_win_odds）。
+# 時系列オッズ（odds_at_bet）は現在未収集。
+#
+# OPTIMISTIC_BIAS: true
+#   → 現在のバックテスト ROI は「楽観値（上限値）」として扱う。
+#   → 実運用では odds_at_bet < odds_final となる場合があり、実際の ROI は低下しうる。
+#   → 時系列オッズ収集パイプラインの構築が最優先データ課題。
+current_odds_status: OPTIMISTIC_BIAS
+
+# バックテスト会計ルール
+#   購入判断: odds_at_bet（または暫定: latest_win_odds）と EV/Overlay で判定
+#   払戻金額: odds_final × stake（日本はパリミュチュエル方式）
+accounting_rule: >
+  purchase_decision = f(odds_at_bet, model_probability)
+  payout = odds_final * stake  (的中時)
+  profit = payout - stake
+
+# 乱数シード（再現性）
+random_seed: 42

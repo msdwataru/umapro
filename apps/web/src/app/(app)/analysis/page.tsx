@@ -16,7 +16,7 @@ export default async function AnalysisPage() {
     .eq("prediction_target", "win")
     .not("edge_value", "is", null)
     .order("edge_value", { ascending: false })
-    .limit(500);
+    .limit(2000);
 
   // コース×距離別のEV集計
   const buckets: Record<string, { count: number; evSum: number; evPlus: number }> = {};
@@ -42,16 +42,14 @@ export default async function AnalysisPage() {
     }))
     .sort((a, b) => b.avgEV - a.avgEV);
 
-  // 上位EV馬
-  const topEdge = (predictions ?? [])
-    .filter((p) => Number(p.edge_value ?? 0) > 0)
-    .slice(0, 20);
+  // 相対EV上位（市場ベースラインモデルは常に負EVのため、相対的に高い上位20件を表示）
+  const topEdge = (predictions ?? []).slice(0, 20);
 
   return (
     <div className="space-y-6">
       <div className="flex items-baseline justify-between">
         <h1 className="text-xl font-bold text-gray-900">条件分析</h1>
-        <p className="text-xs text-gray-400">直近500予測データをもとに集計</p>
+        <p className="text-xs text-gray-400">直近2000予測データをもとに集計</p>
       </div>
 
       {/* コース別期待値 */}
@@ -111,11 +109,12 @@ export default async function AnalysisPage() {
         )}
       </div>
 
-      {/* 上位EV予測 */}
+      {/* 相対EV上位 */}
       {topEdge.length > 0 && (
         <div className="rounded-xl bg-white ring-1 ring-gray-200 overflow-hidden">
           <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
-            <p className="text-sm font-semibold text-gray-700">EV上位予測（直近）</p>
+            <p className="text-sm font-semibold text-gray-700">相対EV上位（直近）</p>
+            <p className="text-xs text-gray-400 mt-0.5">市場ベースラインモデルは EV が常に負。上位＝他条件より割安な条件。</p>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -144,8 +143,8 @@ export default async function AnalysisPage() {
                       </td>
                       <td className="px-4 py-2.5 text-gray-500">{race?.class_name ?? "-"}</td>
                       <td className="px-4 py-2.5 text-right text-gray-500">{p.prediction_rank}位</td>
-                      <td className="px-4 py-2.5 text-right font-semibold text-green-600">
-                        +{Number(p.edge_value).toFixed(3)}
+                      <td className={`px-4 py-2.5 text-right font-semibold ${Number(p.edge_value) >= 0 ? "text-green-600" : "text-gray-500"}`}>
+                        {Number(p.edge_value) >= 0 ? "+" : ""}{Number(p.edge_value).toFixed(3)}
                       </td>
                       <td className="px-4 py-2.5 text-right text-gray-400">-</td>
                     </tr>

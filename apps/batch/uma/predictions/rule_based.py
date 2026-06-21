@@ -15,6 +15,8 @@ from typing import Any
 
 from supabase import Client
 
+from uma.db.client import paginate
+
 logger = logging.getLogger(__name__)
 
 _FEATURE_SET_NAME = "market_baseline"
@@ -67,20 +69,32 @@ def _predicted_at(race: dict[str, Any]) -> str:
     return f"{race['race_date']}T10:00:00+09:00"
 
 
-def generate(client: Client, model_version_id: int, feature_set_id: int) -> int:
+def generate(
+    client: Client,
+    model_version_id: int,
+    feature_set_id: int,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> int:
     """
     全 race_entries から予測値を計算して model_predictions に upsert する。
+    start_date / end_date (YYYY-MM-DD) で対象レースの race_date を絞り込める。
     返り値は書き込んだレコード数。
     """
-    entries = (
+    entries = paginate(lambda off, lim: (
         client.table("race_entries")
         .select("id, race_id, latest_win_odds, races(race_date, scheduled_start_at)")
         .eq("scratch_flag", False)
-        .not_("latest_win_odds", "is", None)
-        .execute()
-    ).data
+        .filter("latest_win_odds", "not.is", "null")
+        .range(off, off + lim - 1)
+    ))
 
-    logger.info("Fetched %d race_entries with odds", len(entries))
+    if start_date:
+        entries = [e for e in entries if e["races"]["race_date"] >= start_date]
+    if end_date:
+        entries = [e for e in entries if e["races"]["race_date"] <= end_date]
+
+    logger.info("Fetched %d race_entries with odds (start=%s, end=%s)", len(entries), start_date, end_date)
 
     # race_id でソートしてグループ化
     entries_sorted = sorted(entries, key=lambda e: e["race_id"])

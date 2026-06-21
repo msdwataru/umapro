@@ -8,6 +8,8 @@ async function createBacktestRun(formData: FormData) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return;
 
+  const modelVersionIdRaw = formData.get("model_version_id") as string;
+  const maxRankRaw = formData.get("max_rank") as string;
   const params = {
     track_type: formData.get("track_type") as string,
     distance_min: Number(formData.get("distance_min")),
@@ -15,6 +17,8 @@ async function createBacktestRun(formData: FormData) {
     ev_threshold: Number(formData.get("ev_threshold")),
     date_from: formData.get("date_from") as string,
     date_to: formData.get("date_to") as string,
+    model_version_id: modelVersionIdRaw ? Number(modelVersionIdRaw) : null,
+    max_rank: maxRankRaw ? Number(maxRankRaw) : null,
   };
 
   const { data } = await supabase
@@ -35,12 +39,24 @@ export default async function BacktestPage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
-  const { data: runs } = await supabase
-    .from("backtest_runs")
-    .select("id, run_name, status, created_at, started_at, finished_at, parameters_json")
-    .eq("user_id", user!.id)
-    .order("created_at", { ascending: false })
-    .limit(20);
+  const [{ data: runs }, { data: modelVersions }] = await Promise.all([
+    supabase
+      .from("backtest_runs")
+      .select("id, run_name, status, created_at, started_at, finished_at, parameters_json")
+      .eq("user_id", user!.id)
+      .order("created_at", { ascending: false })
+      .limit(20),
+    supabase
+      .from("model_versions")
+      .select("id, model_name, version")
+      .eq("is_production", true)
+      .order("model_name"),
+  ]);
+
+  // model_version_id → model_name の逆引き
+  const modelNameMap = Object.fromEntries(
+    (modelVersions ?? []).map((mv) => [mv.id, `${mv.model_name} (${mv.version})`])
+  );
 
   const statusColor: Record<string, string> = {
     queued: "text-yellow-600 bg-yellow-50",
@@ -68,6 +84,20 @@ export default async function BacktestPage() {
               />
             </div>
             <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">予測モデル</label>
+              <select
+                name="model_version_id"
+                className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-indigo-500 focus:outline-none"
+              >
+                <option value="">すべてのモデル（混合）</option>
+                {(modelVersions ?? []).map((mv) => (
+                  <option key={mv.id} value={mv.id}>
+                    {mv.model_name} ({mv.version})
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">コース</label>
               <select
                 name="track_type"
@@ -77,6 +107,31 @@ export default async function BacktestPage() {
                 <option value="芝">芝</option>
                 <option value="ダート">ダート</option>
               </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">EV閾値（以上を買い）</label>
+              <input
+                name="ev_threshold"
+                type="number"
+                defaultValue={0.0}
+                step={0.05}
+                className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-indigo-500 focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">
+                予測上位N頭まで
+                <span className="text-gray-400 ml-1 font-normal">（空白=すべて）</span>
+              </label>
+              <input
+                name="max_rank"
+                type="number"
+                placeholder="例: 1（1番人気のみ）"
+                min={1}
+                max={18}
+                step={1}
+                className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-indigo-500 focus:outline-none"
+              />
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">距離（下限m）</label>
@@ -98,17 +153,6 @@ export default async function BacktestPage() {
                 className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-indigo-500 focus:outline-none"
               />
             </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">EV閾値（以上を買い）</label>
-              <input
-                name="ev_threshold"
-                type="number"
-                defaultValue={0.0}
-                step={0.05}
-                className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-indigo-500 focus:outline-none"
-              />
-            </div>
-            <div className="sm:col-span-1" />
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">開始日</label>
               <input
@@ -152,10 +196,12 @@ export default async function BacktestPage() {
             {runs.map((run) => {
               const params = run.parameters_json as Record<string, unknown> | null;
               const cls = statusColor[run.status] ?? "text-gray-400 bg-gray-50";
+              const modelId = params?.model_version_id as number | null | undefined;
+              const modelLabel = modelId ? modelNameMap[modelId] : null;
               return (
                 <div key={run.id} className="px-4 py-3 flex items-center gap-3 hover:bg-gray-50">
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <Link
                         href={`/backtest/${run.id}`}
                         className="font-medium text-gray-900 hover:text-indigo-600 text-sm"
@@ -165,6 +211,11 @@ export default async function BacktestPage() {
                       <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${cls}`}>
                         {run.status}
                       </span>
+                      {modelLabel && (
+                        <span className="text-xs px-1.5 py-0.5 rounded-full bg-purple-50 text-purple-700 font-medium">
+                          {modelLabel}
+                        </span>
+                      )}
                     </div>
                     {params && (
                       <p className="text-xs text-gray-400 mt-0.5">

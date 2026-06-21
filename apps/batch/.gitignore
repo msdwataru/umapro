@@ -1,0 +1,17 @@
+# 生成物（parquet・モデルファイル・評価 CSV）
+artifacts/
+
+# 一時デバッグスクリプト
+_*.py
+check_*.py
+debug_*.py
+fix_*.py
+get_*.py
+investigate_*.py
+create_*.py
+copy_*.py
+reset_*.py
+
+# 出力ファイル
+*.txt.out
+users_out.txt
